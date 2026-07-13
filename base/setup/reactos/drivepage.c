@@ -31,6 +31,8 @@ static const UINT column_ids[MAX_LIST_COLUMNS] = {IDS_LIST_COLUMN_FIRST, IDS_LIS
 static const INT  column_widths[MAX_LIST_COLUMNS] = {200, 90, 60, 60};
 static const INT  column_alignment[MAX_LIST_COLUMNS] = {LVCFMT_LEFT, LVCFMT_LEFT, LVCFMT_RIGHT, LVCFMT_RIGHT};
 
+#define TreeList_SetItemState   TreeView_SetItemState
+
 /* FUNCTIONS ****************************************************************/
 
 /**
@@ -278,7 +280,7 @@ MoreOptDlgProc(
                 iCurrent = iDefault;
             SendDlgItemMessageW(hDlg, IDC_INSTFREELDR, CB_SETCURSEL, iCurrent, 0);
 
-            break;
+            return TRUE;
         }
 
         case WM_DESTROY:
@@ -441,7 +443,7 @@ FormatDlgProcWorker(
             else
                 CheckDlgButton(hDlg, IDC_CHECK_QUICKFMT, BST_UNCHECKED);
 
-            break;
+            return TRUE;
         }
 
         case WM_COMMAND:
@@ -1627,13 +1629,6 @@ DriveDlgProc(
             UiContext.hPartList = hList;
             InitPartitionList(pSetupData->hInstance, hList);
             DrawPartitionList(hList, pSetupData->PartitionList);
-
-            // HACK: Wine "kwality" code doesn't still implement
-            // PSN_QUERYINITIALFOCUS so we "emulate" its call there...
-            {
-            PSHNOTIFY pshn = {{hwndDlg, GetWindowLong(hwndDlg, GWL_ID), PSN_QUERYINITIALFOCUS}, (LPARAM)hList};
-            SendMessageW(hwndDlg, WM_NOTIFY, (WPARAM)pshn.hdr.idFrom, (LPARAM)&pshn);
-            }
             break;
         }
 
@@ -1839,12 +1834,18 @@ DriveDlgProc(
             {
                 LPNMTREEVIEW pnmv = (LPNMTREEVIEW)lParam;
 
-                // if (!(pnmv->uChanged & TVIF_STATE)) /* The state has changed */
-                if (!(pnmv->itemNew.mask & TVIF_STATE))
+                /* Check whether the item has been (de)selected */
+#if 0 // When using NMTVITEMCHANGE
+                if (!(pnmv->uChanged & TVIF_STATE) ||
+                    !((pnmv->uStateOld ^ pnmv->uStateNew) & TVIS_SELECTED))
+                { break; }
+#endif
+                if (!((pnmv->itemOld.mask | pnmv->itemNew.mask) & TVIF_STATE) ||
+                    !((pnmv->itemOld.state ^ pnmv->itemNew.state) & TVIS_SELECTED))
+                {
                     break;
+                }
 
-                /* The item has been (de)selected */
-                // if (pnmv->uNewState & TVIS_SELECTED)
                 if (pnmv->itemNew.state & TVIS_SELECTED)
                 {
                     HTLITEM hParentItem = TreeList_GetParent(lpnm->hwndFrom, pnmv->itemNew.hItem);
@@ -1979,11 +1980,22 @@ DisableWizNext:
 
                 case PSN_QUERYINITIALFOCUS:
                 {
-                    /* Give the focus on and select the first item */
+                    /* Reselect the currently selected item, so as to refresh the UI buttons */
+                    HTLITEM hItem;
                     hList = GetDlgItem(hwndDlg, IDC_PARTITION);
-                    // TreeList_SetFocusItem(hList, 1, 1);
-                    TreeList_SelectItem(hList, 1);
-                    SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, (LONG_PTR)hList);
+                    hItem = TreeList_GetSelection(hList);
+                    if (hItem)
+                    {
+                        /* Don't use TreeList_SelectItem() directly. Instead,
+                         * deselect first the item before reselecting it, so as to
+                         * invalidate its cached state and have the TVN_SELCHANGED
+                         * notification sent. */
+                        TreeList_SetItemState(hList, hItem, 0, TVIS_SELECTED);
+                        TreeList_SetItemState(hList, hItem, TVIS_SELECTED, TVIS_SELECTED);
+                    }
+
+                    /* Focus on the partition list */
+                    SetWindowLongPtrW(hwndDlg, DWLP_MSGRESULT, (LONG_PTR)hList);
                     return TRUE;
                 }
 

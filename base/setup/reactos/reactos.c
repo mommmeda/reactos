@@ -380,7 +380,7 @@ StartDlgProc(
 
             /* Center the wizard window */
             CenterWindow(GetParent(hwndDlg));
-            break;
+            return TRUE;
         }
 
         case WM_NOTIFY:
@@ -462,7 +462,9 @@ TypeDlgProc(
                 EnableWindow(GetDlgItem(hwndDlg, IDC_UPDATETEXT), FALSE);
             }
 
-            break;
+            /* Ensure "Install ReactOS" is initially focused */
+            SetFocus(GetDlgItem(hwndDlg, IDC_INSTALL));
+            return FALSE;
         }
 
         case WM_NOTIFY:
@@ -474,13 +476,6 @@ TypeDlgProc(
                 case PSN_SETACTIVE:
                     PropSheet_SetWizButtons(GetParent(hwndDlg), PSWIZB_BACK | PSWIZB_NEXT);
                     break;
-
-                case PSN_QUERYINITIALFOCUS:
-                {
-                    /* Focus on "Install ReactOS" */
-                    SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, (LONG_PTR)GetDlgItem(hwndDlg, IDC_INSTALL));
-                    return TRUE;
-                }
 
                 case PSN_QUERYCANCEL:
                 {
@@ -813,12 +808,6 @@ UpgradeRepairDlgProc(
             pSetupData = (PSETUPDATA)((LPPROPSHEETPAGE)lParam)->lParam;
             SetWindowLongPtrW(hwndDlg, GWLP_USERDATA, (DWORD_PTR)pSetupData);
 
-            /*
-             * Keep the "Next" button disabled. It will be enabled only
-             * when the user selects an installation to upgrade.
-             */
-            PropSheet_SetWizButtons(GetParent(hwndDlg), PSWIZB_BACK);
-
             hList = GetDlgItem(hwndDlg, IDC_NTOSLIST);
 
             ListView_SetExtendedListViewStyleEx(hList, LVS_EX_FULLROWSELECT, LVS_EX_FULLROWSELECT);
@@ -878,46 +867,52 @@ UpgradeRepairDlgProc(
             {
                 LPNMLISTVIEW pnmv = (LPNMLISTVIEW)lParam;
 
-                if (pnmv->uChanged & LVIF_STATE) /* The state has changed */
+                /* Check whether the item has been (de)selected */
+                if (!(pnmv->uChanged & LVIF_STATE) ||
+                    !((pnmv->uOldState ^ pnmv->uNewState) & LVIS_SELECTED))
                 {
-                    /* The item has been (de)selected */
-                    if (pnmv->uNewState & (LVIS_FOCUSED | LVIS_SELECTED))
-                    {
-                        PropSheet_SetWizButtons(GetParent(hwndDlg), PSWIZB_BACK | PSWIZB_NEXT);
-                    }
-                    else
-                    {
-                        /*
-                         * Keep the "Next" button disabled. It will be enabled only
-                         * when the user selects an installation to upgrade.
-                         */
-                        PropSheet_SetWizButtons(GetParent(hwndDlg), PSWIZB_BACK);
-                    }
+                    break;
                 }
 
+                /* Enable or disable the "Next" button when the user
+                 * selects or deselects an installation to upgrade */
+                if (pnmv->uNewState & LVIS_SELECTED)
+                    PropSheet_SetWizButtons(GetParent(hwndDlg), PSWIZB_BACK | PSWIZB_NEXT);
+                else
+                    PropSheet_SetWizButtons(GetParent(hwndDlg), PSWIZB_BACK);
                 break;
             }
 
             switch (lpnm->code)
             {
-#if 0
                 case PSN_SETACTIVE:
                 {
-                    /*
-                     * Keep the "Next" button disabled. It will be enabled only
-                     * when the user selects an installation to upgrade.
-                     */
+                    /* Keep the "Next" button disabled. It will be enabled only
+                     * when the user selects an installation to upgrade. */
                     PropSheet_SetWizButtons(GetParent(hwndDlg), PSWIZB_BACK);
                     break;
                 }
-#endif
 
                 case PSN_QUERYINITIALFOCUS:
                 {
-                    /* Give the focus on and select the first item */
+                    /* Reselect the currently selected item, so as to refresh the UI buttons */
+                    INT Index;
                     hList = GetDlgItem(hwndDlg, IDC_NTOSLIST);
-                    ListView_SetItemState(hList, 0, LVIS_FOCUSED | LVIS_SELECTED, LVIS_FOCUSED | LVIS_SELECTED);
-                    SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, (LONG_PTR)hList);
+                    Index = ListView_GetSelectionMark(hList);
+                    if (Index != LB_ERR)
+                    {
+                        /* Deselect first the item before reselecting it, so as to
+                         * invalidate its cached state and have the LVN_ITEMCHANGED
+                         * notification sent. */
+                        //ListView_EnsureVisible(hList, Index, FALSE);
+                        ListView_SetItemState(hList, Index, 0, LVIS_SELECTED);
+                        ListView_SetItemState(hList, Index,
+                                              LVIS_FOCUSED | LVIS_SELECTED,
+                                              LVIS_FOCUSED | LVIS_SELECTED);
+                    }
+
+                    /* Focus on the installations list */
+                    SetWindowLongPtrW(hwndDlg, DWLP_MSGRESULT, (LONG_PTR)hList);
                     return TRUE;
                 }
 
@@ -1016,7 +1011,7 @@ DeviceDlgProc(
             // hList = GetDlgItem(hwndDlg, IDC_KEYBOARD_LAYOUT);
             // InitGenericComboList(hList, pSetupData->USetupData.LayoutList, GetSettingDescription);
 
-            break;
+            return TRUE;
         }
 
         case WM_NOTIFY:
@@ -1028,13 +1023,6 @@ DeviceDlgProc(
                 case PSN_SETACTIVE:
                     PropSheet_SetWizButtons(GetParent(hwndDlg), PSWIZB_BACK | PSWIZB_NEXT);
                     break;
-
-                case PSN_QUERYINITIALFOCUS:
-                {
-                    /* Focus on "Computer" list */
-                    SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, (LONG_PTR)GetDlgItem(hwndDlg, IDC_COMPUTER));
-                    return TRUE;
-                }
 
                 case PSN_QUERYCANCEL:
                 {
@@ -1220,10 +1208,8 @@ SummaryDlgProc(
                                       pSetupData->hInstance,
                                       IDS_INSTALLBTN);
 
-                    /*
-                     * Keep the "Next" button disabled. It will be enabled only
-                     * when the user clicks on the installation approval checkbox.
-                     */
+                    /* Keep the "Next" button disabled. It will be enabled only
+                     * when the user clicks on the installation approval checkbox. */
                     CheckDlgButton(hwndDlg, IDC_CONFIRM_INSTALL, BST_UNCHECKED);
                     PropSheet_SetWizButtons(GetParent(hwndDlg), PSWIZB_BACK);
                     break;
@@ -1232,7 +1218,7 @@ SummaryDlgProc(
                 case PSN_QUERYINITIALFOCUS:
                 {
                     /* Focus on the confirmation check-box */
-                    SetWindowLongPtr(hwndDlg, DWLP_MSGRESULT, (LONG_PTR)GetDlgItem(hwndDlg, IDC_CONFIRM_INSTALL));
+                    SetWindowLongPtrW(hwndDlg, DWLP_MSGRESULT, (LONG_PTR)GetDlgItem(hwndDlg, IDC_CONFIRM_INSTALL));
                     return TRUE;
                 }
 
@@ -2537,7 +2523,7 @@ FinishDlgProc(
             /* Ensure that the installer wizard window is made visible and focused */
             ShowWindow(GetParent(hwndDlg), SW_SHOW);
             SwitchToThisWindow(GetParent(hwndDlg), TRUE);
-            break;
+            return TRUE;
         }
 
         case WM_DESTROY:
