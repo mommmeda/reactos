@@ -2286,9 +2286,10 @@ ProcessDlgProc(
             pSetupData = (PSETUPDATA)((LPPROPSHEETPAGE)lParam)->lParam;
             SetWindowLongPtrW(hwndDlg, GWLP_USERDATA, (DWORD_PTR)pSetupData);
 
-            /* Reset status text */
+            /* Reset the status text and set the main item in bold */
             SetDlgItemTextW(hwndDlg, IDC_ACTIVITY, L"");
             SetDlgItemTextW(hwndDlg, IDC_ITEM, L"");
+            SetDlgItemFont(hwndDlg, IDC_ACTIVITY, pSetupData->hBoldFont, TRUE);
             break;
         }
 
