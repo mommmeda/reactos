@@ -40,6 +40,7 @@ UI_CONTEXT UiContext;
 
 /* FUNCTIONS ****************************************************************/
 
+// See also setupapi!pSetupCenterWindowRelativeToParent()
 static VOID
 CenterWindow(HWND hWnd)
 {
@@ -378,8 +379,8 @@ StartDlgProc(
             SetDlgItemFont(hwndDlg, IDC_WARNTEXT2, pSetupData->hBoldFont, TRUE);
             SetDlgItemFont(hwndDlg, IDC_WARNTEXT3, pSetupData->hBoldFont, TRUE);
 
-            /* Center the wizard window */
-            CenterWindow(GetParent(hwndDlg));
+            ///* Center the wizard window */
+            //CenterWindow(GetParent(hwndDlg));
             return TRUE;
         }
 
@@ -3233,6 +3234,110 @@ WINAPI setupDelayHook(unsigned dliNotify, PDelayLoadInfo pdli)
 /*ExternC*/ PfnDliHook __pfnDliFailureHook2 = setupDelayHook;
 
 
+#include <pshpack1.h>
+typedef struct DLGTEMPLATEEX
+{
+    WORD dlgVer;
+    WORD signature;
+    DWORD helpID;
+    DWORD exStyle;
+    DWORD style;
+    WORD cDlgItems;
+    short x;
+    short y;
+    short cx;
+    short cy;
+} DLGTEMPLATEEX, *LPDLGTEMPLATEEX;
+#include <poppack.h>
+
+WNDPROC wpOrgPrshtProc = NULL;
+
+/* Message handler for property sheet dialog */
+static LRESULT
+CALLBACK
+PrshtWndProc(HWND hWnd, UINT uMessage, WPARAM wParam, LPARAM lParam)
+{
+    switch (uMessage)
+    {
+        case DM_REPOSITION:
+        {
+            /* Center the wizard window */
+            CenterWindow(hWnd);
+            // FIXME: HACK: See hack in PropSheetCallback()::PSCB_INITIALIZED
+            ShowWindow(hWnd, SW_SHOWNORMAL);
+            break;
+        }
+
+        case WM_DESTROY:
+        {
+            /* Restore the original dialog procedure */
+            ASSERT(wpOrgPrshtProc);
+            SetWindowLongPtrW(hWnd, DWLP_DLGPROC, (LONG_PTR)wpOrgPrshtProc);
+        }
+
+        default:
+            break;
+    }
+
+    /* Invoke the original dialog procedure */
+    return CallWindowProc(wpOrgPrshtProc, hWnd, uMessage, wParam, lParam);
+}
+
+static int
+CALLBACK
+PropSheetCallback(
+    _In_ HWND hDlg,
+    _In_ UINT message,
+    _In_ LPARAM lParam)
+{
+    switch (message)
+    {
+        case PSCB_PRECREATE:
+        {
+            LPDLGTEMPLATE   dlgTemplate   =   (LPDLGTEMPLATE)lParam;
+            LPDLGTEMPLATEEX dlgTemplateEx = (LPDLGTEMPLATEEX)lParam;
+            DWORD dwStyle = 0, dwStyleMask = 0;
+
+            // FIXME: HACK: See hack in PropSheetCallback()::PSCB_INITIALIZED
+            // Hide the dialog by default; DM_REPOSITION will center it on screen then show it.
+            dwStyleMask |= WS_VISIBLE;
+
+            dwStyle |= DS_CENTER; // Center the dialog -- But propsheet code repositions it afterwards...
+            //dwStyleMask |= DS_CONTEXTHELP; // TODO: Enable if you want context help.
+            dwStyle |= DS_SETFOREGROUND; // Ensure we are initially set to the foreground.
+            dwStyleMask |= dwStyle;
+
+            /* Set the property sheet dialog styles */
+            if (dlgTemplateEx->signature == 0xFFFF)
+                dlgTemplateEx->style = (dlgTemplateEx->style & ~dwStyleMask) | (dwStyle & dwStyleMask);
+            else
+                dlgTemplate->style = (dlgTemplate->style & ~dwStyleMask) | (dwStyle & dwStyleMask);
+            break;
+        }
+
+        // NOTE: This callback is needed to set large icon correctly.
+        case PSCB_INITIALIZED:
+        {
+            HICON hIcon = LoadIconW(SetupData.hInstance, MAKEINTRESOURCEW(IDI_MAIN));
+            SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hIcon);
+
+            /* Sub-class the property sheet window procedure */
+            wpOrgPrshtProc = (WNDPROC)SetWindowLongPtrW(hDlg, DWLP_DLGPROC, (LONG_PTR)PrshtWndProc);
+
+            // FIXME: HACK: Wine comctl32 propsheet.c doesn't send DM_REPOSITION
+            // after creating, initializing and resizing the property sheet dialog,
+            // so we simulate its call there...
+            PostMessageW(hDlg, DM_REPOSITION, 0, 0);
+            break;
+        }
+
+        default:
+            break;
+    }
+
+    return FALSE;
+}
+
 int WINAPI
 _tWinMain(HINSTANCE hInst,
           HINSTANCE hPrevInstance,
@@ -3397,12 +3502,15 @@ _tWinMain(HINSTANCE hInst,
 
     /* Create the property sheet */
     psh.dwSize = sizeof(psh);
-    psh.dwFlags = PSH_WIZARD97 | PSH_WATERMARK | PSH_HEADER;
+    psh.dwFlags = PSH_WIZARD97 | /*PSH_PROPTITLE |*/ PSH_USEICONID | PSH_USECALLBACK | PSH_WATERMARK | PSH_HEADER;
     psh.hInstance = hInst;
     psh.hwndParent = NULL;
+    psh.pszIcon = MAKEINTRESOURCEW(IDI_MAIN);
+    // psh.pszCaption = lpszTitle;
     psh.nPages = nPages;
     psh.nStartPage = 0;
     psh.phpage = ahpsp;
+    psh.pfnCallback = PropSheetCallback;
     psh.pszbmWatermark = MAKEINTRESOURCEW(IDB_WATERMARK);
     psh.pszbmHeader = MAKEINTRESOURCEW(IDB_HEADER);
 
