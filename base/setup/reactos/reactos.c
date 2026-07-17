@@ -2516,15 +2516,8 @@ FinishDlgProc(
                 ShowDlgItem(hwndDlg, IDC_RESTART_PROGRESS, SW_HIDE);
             }
 
-            /* If the installation is aborted, change the "Cancel" button text to "Close" */
-            if (pSetupData->bStopInstall)
-            {
-                SetWindowResTextW(GetDlgItem(hWndParent, IDCANCEL),
-                                  GetModuleHandleW(L"comctl32.dll"),
-                                  IDS_CLOSE);
-            }
-
-            /* Ensure that the installer wizard window is made visible and focused */
+            /* Ensure that the wizard window is centered, made visible, and focused */
+            CenterWindow(hWndParent);
             ShowWindow(hWndParent, SW_SHOW);
             SwitchToThisWindow(hWndParent, TRUE);
             return TRUE;
@@ -2586,6 +2579,14 @@ FinishDlgProc(
                     ShowDlgItem(hWndParent, ID_WIZBACK, SW_HIDE);
                     ShowDlgItem(hWndParent, ID_WIZNEXT, SW_HIDE);
 
+                    /* If the installation is aborted, change the "Cancel" button text to "Close" */
+                    if (pSetupData->bStopInstall)
+                    {
+                        SetWindowResTextW(GetDlgItem(hWndParent, IDCANCEL),
+                                          GetModuleHandleW(L"comctl32.dll"),
+                                          IDS_CLOSE);
+                    }
+
                     /* Change the "Finish" button text to "Restart" */
                     SetWindowResTextW(GetDlgItem(hWndParent, ID_WIZFINISH),
                                       pSetupData->hInstance,
@@ -2628,6 +2629,10 @@ FinishDlgProc(
 
                     break;
                 }
+
+                case PSN_KILLACTIVE:
+                    KillTimer(hwndDlg, 1);
+                    break;
 
                 case PSN_WIZNEXT:
                 case PSN_WIZFINISH:
